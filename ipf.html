@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Isometric Piping Drawing</title>
+<style>
+:root{--paper:#f5f2e8;--panel:#fbfaf6;--ink:#1c2530;--line:#d8d0bb;--muted:#6d6a60;--accent:#a8432a}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--paper);color:var(--ink);font-family:"IBM Plex Sans",Tahoma,Arial,sans-serif;font-size:14px}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+header label{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:4px}
+select,input,button{font:inherit;padding:6px 8px;border:1px solid #bdb49c;border-radius:6px;background:#fff;color:var(--ink)}
+input[type=number]{width:90px}
+#sym{min-width:230px}
+button{cursor:pointer;touch-action:manipulation}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.copy{margin-inline-start:auto;color:var(--muted);font-size:12px;white-space:nowrap}
+body{display:flex;flex-direction:column}
+header{flex:none}
+.body{display:flex;flex:1;min-height:0}
+aside{width:120px;flex:none;background:var(--panel);border-right:1px solid var(--line);display:flex;align-items:center;justify-content:center}
+aside svg{width:110px;height:190px}
+#area{flex:1;position:relative;min-width:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:grab}
+canvas:active{cursor:grabbing}
+#list{position:absolute;left:10px;bottom:10px;max-height:45%;width:320px;overflow:auto;background:#fffffff2;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;pointer-events:none}
+#list div{padding:3px 0;border-bottom:1px dashed var(--line)}
+#list .tot{font-weight:600;border:0}
+#list .anc{color:var(--accent);font-weight:600}
+@media (max-width:700px){
+  header{flex-wrap:wrap;gap:4px;padding:4px 6px}
+  header label{font-size:10px;gap:2px}
+  select,input,button{padding:2px 4px;font-size:10px;border-radius:4px;flex:none}
+  #sym{min-width:120px;max-width:150px}
+  input[type=number]{width:52px}
+  .copy{margin-inline-start:0;width:100%;font-size:9px;text-align:center}
+  aside{width:72px}
+  aside svg{width:66px;height:114px}
+  #list{left:6px;right:6px;bottom:6px;width:auto;max-height:34%;font-size:12px}
+}
+#bom{position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;z-index:9}
+#bom[hidden]{display:none}
+#bom .sheet{background:#fff;color:#000;width:min(980px,96vw);max-height:92vh;overflow:auto;padding:16px;border-radius:8px;font-family:"IBM Plex Sans",Tahoma,Arial,sans-serif}
+#bom h3{margin:12px 0 4px}
+#bom img{width:100%;border:1px solid #ccc;background:#fff}
+#bom table{width:100%;border-collapse:collapse;font-size:12px}
+#bom th,#bom td{border:1px solid #999;padding:4px 6px;text-align:left}
+#bom th{background:#eee}
+#bom .bar{display:flex;gap:6px;justify-content:flex-end;margin-bottom:8px}
+@media print{
+  body *{visibility:hidden}
+  #bom,#bom *{visibility:visible}
+  #bom{position:absolute;left:0;top:0;background:#fff;display:block}
+  #bom .sheet{max-height:none;overflow:visible;width:100%;padding:0}
+  #bom .bar{display:none}
+}
+</style>
+</head>
+<body>
+<header>
+  <label>Symbol <select id="sym"></select></label>
+  <label>Joint <select id="jt">
+    <option value="BW">Buttweld</option>
+    <option value="SW">Socketweld</option>
+    <option value="TH">Threaded</option>
+    <option value="FL">Flanged</option>
+  </select></label>
+  <label>Length (mm) <input id="len" type="number" value="1000" min="0"></label>
+  <label>Direction <select id="dir">
+    <option value="N">North</option>
+    <option value="S">South</option>
+    <option value="E">East</option>
+    <option value="W">West</option>
+    <option value="U">Up</option>
+    <option value="D">Down</option>
+  </select></label>
+  <label>Angle° <input id="ang" type="number" value="0" min="0" max="180" step="5" style="width:64px"></label>
+  <label>Bend <select id="side">
+    <option value="U">Up</option>
+    <option value="D">Down</option>
+    <option value="L">Left</option>
+    <option value="R">Right</option>
+  </select></label>
+  <label>Size <input id="size" type="text" placeholder="2 x 1" style="width:80px"></label>
+  <label>Sch/Class <input id="sch" type="text" placeholder="SCH40" style="width:84px"></label>
+  <button class="primary" id="add">Add</button>
+  <button id="cb" disabled>Cancel branch</button>
+  <button id="undo">Undo</button>
+  <button id="clr">Clear all</button>
+  <button id="zin">Zoom +</button>
+  <button id="zout">Zoom −</button>
+  <button id="center">Recenter</button>
+  <button id="fitb">Fit all</button>
+  <button id="flipb">Mirror next: Off</button>
+  <button id="flipl">Mirror last</button>
+  <label>Facing <select id="face">
+    <option value="">Auto</option>
+    <option value="N">North</option>
+    <option value="E">East</option>
+    <option value="S">South</option>
+    <option value="W">West</option>
+    <option value="U">Up</option>
+    <option value="D">Down</option>
+  </select></label>
+  <button id="png">Save PNG</button>
+  <button id="bomb">BOM</button>
+  <span class="copy">© 2026 BENMANSOUR SAMI. All rights reserved.</span>
+</header>
+<div class="body">
+  <aside>
+    <svg viewBox="0 0 110 190" aria-label="Direction compass">
+      <g stroke="#1c2530" stroke-width="2" fill="none">
+        <line x1="55" y1="95" x2="89.6" y2="75"/>
+        <line x1="55" y1="95" x2="20.4" y2="115"/>
+        <line x1="55" y1="95" x2="20.4" y2="75"/>
+        <line x1="55" y1="95" x2="89.6" y2="115"/>
+        <line x1="55" y1="95" x2="55" y2="55"/>
+        <line x1="55" y1="95" x2="55" y2="135"/>
+      </g>
+      <circle cx="55" cy="95" r="3" fill="#a8432a"/>
+      <g font-size="9" text-anchor="middle" fill="#1c2530" font-family="IBM Plex Sans,Tahoma,Arial,sans-serif">
+        <text x="92" y="66">North</text>
+        <text x="18" y="66">East</text>
+        <text x="22" y="130">South</text>
+        <text x="88" y="130">West</text>
+        <text x="55" y="44">Up</text>
+        <text x="55" y="152">Down</text>
+      </g>
+    </svg>
+  </aside>
+  <div id="area">
+    <canvas id="cv"></canvas>
+    <div id="list"></div>
+  </div>
+</div>
+<script>
+window.addEventListener('DOMContentLoaded', () => {
+const $ = i => document.getElementById(i);
+const cv = $('cv');
+let ctx = cv.getContext('2d');
+const SCALE = 0.08, G = 22, ACC = '#a8432a';
+const DIR = {N:[.866,-.5], S:[-.866,.5], E:[-.866,-.5], W:[.866,.5], U:[0,-1], D:[0,1]};
+const DN = {N:'North', S:'South', E:'East', W:'West', U:'Up', D:'Down'};
+// Symbol cross-direction: the other isometric horizontal axis (never a screen-perpendicular)
+const PERP = {N:[.866,.5], S:[.866,.5], E:[.866,-.5], W:[.866,-.5], U:[.866,-.5], D:[.866,-.5]};
+// 3D unit vectors [N, E, Up] and how each one projects onto the isometric screen
+const BASE = {N:[1,0,0], S:[-1,0,0], E:[0,1,0], W:[0,-1,0], U:[0,0,1], D:[0,0,-1]};
+const SCR_N = [.866,-.5], SCR_E = [-.866,-.5], SCR_U = [0,-1];
+function scr(c) {
+  return [c[0]*SCR_N[0] + c[1]*SCR_E[0] + c[2]*SCR_U[0], c[0]*SCR_N[1] + c[1]*SCR_E[1] + c[2]*SCR_U[1]];
+}
+function vecOf(it) { return it.c || BASE[it.d]; }
+function scrOf(it) { return scr(vecOf(it)); }
+// Rotate the source piece's direction by deg toward Up, Down, Left or Right
+function bendVec(src, deg, side) {
+  const p = vecOf(src), n = Math.hypot(p[0], p[1], p[2]), u = p.map(v => v / n);
+  let s;
+  if (side === 'U') s = [0, 0, 1];
+  else if (side === 'D') s = [0, 0, -1];
+  else {
+    let perp = Math.abs(u[2]) < 1e-6 ? [-u[1], u[0], 0] : [1, 0, 0];
+    const pl = Math.hypot(perp[0], perp[1], perp[2]);
+    perp = perp.map(v => v / pl);
+    s = side === 'L' ? perp : perp.map(v => -v);
+  }
+  const t = deg * Math.PI / 180;
+  return u.map((v, i) => Math.cos(t) * v + Math.sin(t) * s[i]);
+}
+const LIST = [
+  ['Basic', [['pipe','Pipe','pipe','p']]],
+  ['Fittings', [
+    ['elbow90','Elbow 90°','elbow','f'],['elbow45','Elbow 45°','elbow','f'],
+    ['tee','Equal Tee','tee','f'],['teeR','Reducing Tee','tee','f'],
+    ['cap','Cap','cap','f'],['redC','Concentric Reducer','red','f'],
+    ['redE','Eccentric Reducer','red','f'],
+    ['wO','Weldolet','olet','f'],['nO','Nipolet','olet','f'],['fO','Flangolet','olet','f']]],
+  ['Flanges', [
+    ['wnf','Weldneck Flange','flange','g'],['slip','Slip-On Flange','flange','g'],
+    ['lap','Lap Joint Flange','flange','g'],['blind','Blind Flange','blind','g']]],
+  ['Valves', [
+    ['gate','Gate Valve','gate','f'],['globe','Globe Valve','globe','f'],
+    ['ball','Ball Valve','ball','f'],['butterfly','Butterfly Valve','butterfly','f'],
+    ['check','Check Valve','check','f'],['needle','Needle Valve','needle','f'],
+    ['plug','Plug Valve','plug','f'],['three','Three Way Valve','three','f'],
+    ['yv','Y Type Valve','yv','f'],['diaph','Diaphragm Valve','diaph','f'],
+    ['bottom','Bottom Valve','bottom','f']]],
+  ['Special Items', [
+    ['SP','Blind (SP)','sp','s'],['HB','Hammer Blind (HB)','sp','s'],
+    ['SB','Spectacle Blind (SB)','sp','s'],['RO','Restriction Orifice (RO)','sp','s'],
+    ['SG','Sight Glass (SG)','sp','s'],['CS','Conical Strainer','cs','s'],
+    ['YS','Y Type Strainer','ys','s'],['PRV','Flanged Relief Valve','prv','s'],
+    ['SPC','Spacer','spacer','s'],['FW','Field Weld (FW)','fw','s'],
+    ['ORF','Orifice Assembly','orf','s'],['P2P','Pipe to Pipe Connection','p2p','s']]]
+];
+
+const SYMS = {};
+LIST.forEach(([g, arr]) => {
+  const og = document.createElement('optgroup');
+  og.label = g;
+  arr.forEach(([k, n, sh, f]) => { SYMS[k] = {n, sh, f}; og.appendChild(new Option(n, k)); });
+  $('sym').appendChild(og);
+});
+
+let items = [];
+let anchor = null;            // {idx, x, y, mm, seg} : branch point anywhere on a drawn line
+let segs = [];                // drawn geometry of the last render, used for hit-testing
+const dpr = window.devicePixelRatio || 1;
+let V = {x: 0, y: 0, z: 1};   // screen position of model origin and zoom
+
+function fit() {
+  const a = $('area');
+  if (!a.clientWidth || !a.clientHeight) { requestAnimationFrame(fit); return; }
+  cv.width = a.clientWidth * dpr; cv.height = a.clientHeight * dpr;
+  if (!fit.done) { resetView(); fit.done = true; }
+  render();
+}
+function resetView() {
+  const a = $('area');
+  V = {x: a.clientWidth / 2, y: a.clientHeight / 2, z: 1};
+}
+function zoomAt(mx, my, f) {
+  const nz = Math.min(8, Math.max(0.2, V.z * f));
+  const mxm = (mx - V.x) / V.z, mym = (my - V.y) / V.z;
+  V.z = nz; V.x = mx - mxm * nz; V.y = my - mym * nz;
+  render();
+}
+
+function chainEnd() {
+  if (!items.length) return [0, 0];
+  const it = items[items.length - 1], [ux, uy] = scrOf(it), l = it.len * SCALE;
+  return [it.x + ux*l, it.y + uy*l];
+}
+
+function grid(w, h) {
+  const A = [G * .866, G * .5], B = [-G * .866, G * .5];
+  const K = Math.min(400, Math.ceil(Math.max(w, h) / (V.z * G)) + 10);
+  ctx.strokeStyle = '#e2dac6'; ctx.lineWidth = 1 / V.z;
+  ctx.beginPath();
+  for (let i = -K; i <= K; i++) {
+    ctx.moveTo(i*A[0] - K*B[0], i*A[1] - K*B[1]);
+    ctx.lineTo(i*A[0] + K*B[0], i*A[1] + K*B[1]);
+  }
+  for (let j = -K; j <= K; j++) {
+    ctx.moveTo(j*B[0] - K*A[0], j*B[1] - K*A[1]);
+    ctx.lineTo(j*B[0] + K*A[0], j*B[1] + K*A[1]);
+  }
+  ctx.stroke();
+}
+
+// Draws one symbol and records its lines (segs) so any point on them can be picked
+function drawItem(it, i, x, y, ux, uy) {
+  const [px, py] = PERP[it.d], k = it.key, sh = it.sh;
+  // Facing: the drawing axis the symbol's branch/stem follows (default: across the pipe).
+  // v = offset along the facing axis. Mirror (flip) is applied separately to the pipe axis.
+  const F0 = it.face ? DIR[it.face] : PERP[it.d];
+  const mA = it.flip ? -1 : 1;   // mirror: reverses the symbol along its pipe axis
+  const fx = F0[0], fy = F0[1];
+  const SZ = 1.3;                                // fitting symbol size
+  const P = (a, b, v = 0) => [x + SZ*(ux*mA*a + px*b + fx*v), y + SZ*(uy*mA*a + py*b + fy*v)];
+  const L = (pts, c) => {
+    const m = pts.map(q => P(q[0], q[1], q[2] || 0));
+    ctx.beginPath();
+    m.forEach(([X, Y], j) => j ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y));
+    if (c) ctx.closePath();
+    ctx.stroke();
+    for (let j = 0; j < m.length - 1; j++) segs.push({i, x1: m[j][0], y1: m[j][1], x2: m[j+1][0], y2: m[j+1][1]});
+    if (c && m.length > 2) segs.push({i, x1: m[m.length-1][0], y1: m[m.length-1][1], x2: m[0][0], y2: m[0][1]});
+  };
+  const C = (a, b, r, f, v = 0) => {
+    const [X, Y] = P(a, b, v), k = r * 0.82 * SZ;
+    ctx.beginPath();
+    for (let q = 0; q <= 32; q++) {
+      const t = q / 32 * Math.PI * 2;
+      const cx = X + k * (Math.cos(t) * .866 + Math.sin(t) * .866);
+      const cy = Y + k * (Math.cos(t) * .5 - Math.sin(t) * .5);
+      q ? ctx.lineTo(cx, cy) : ctx.moveTo(cx, cy);
+    }
+    ctx.closePath();
+    f ? ctx.fill() : ctx.stroke();
+    segs.push({i, pt: true, x: X, y: Y});
+  };
+  const T = (s, a, b) => { const [X, Y] = P(a, b); ctx.fillText(s, X, Y); };
+  const bow = () => { L([[-10,-7],[-10,7],[0,0]], 1); L([[10,-7],[10,7],[0,0]], 1); };
+
+  if (it.f === 'f') {
+    const J = {
+      BW: () => C(0, 0, 3.5, 1),
+      SW: () => L([[-3,-3],[3,-3],[3,3],[-3,3]], 1),
+      TH: () => L([[0,-6],[0,6]]),
+      FL: () => { L([[-3,-8],[-3,8]]); L([[3,-8],[3,8]]); }
+    };
+    J[it.j]();
+  }
+
+  const lw = ctx.lineWidth;
+  switch (sh) {
+    case 'tee': L([[0,0,0],[0,0,16]]); break;
+    case 'red': L([[0,-8],[0,8],[14,0]], 1); break;
+    case 'cap': L([[0,-8],[0,8]]); break;
+    case 'olet':
+      L([[0,0,0],[0,0,18]]);
+      if (k === 'wO') C(0, 0, 3.5, 1, 18);
+      else if (k === 'fO') L([[-6,0,18],[6,0,18]]);
+      else C(0, 0, 3, 0, 18);
+      break;
+    case 'flange': ctx.lineWidth = 4 / V.z; L([[0,-9],[0,9]]); ctx.lineWidth = lw; break;
+    case 'blind': ctx.lineWidth = 4 / V.z; L([[0,-9],[0,9]]); ctx.lineWidth = lw; L([[-7,-7],[7,7]]); break;
+    case 'gate': bow(); break;
+    case 'globe': bow(); C(0, 0, 3.5, 1); break;
+    case 'ball': bow(); C(0, 0, 7); break;
+    case 'butterfly': C(0, 0, 7); L([[-9,0],[9,0]]); break;
+    case 'check': L([[-10,-7],[-10,7],[8,0]], 1); L([[8,-7],[8,7]]); break;
+    case 'needle': bow(); L([[0,0,0],[0,0,14]]); L([[-3,0,14],[3,0,14],[0,0,6]], 1); break;
+    case 'plug': bow(); L([[0,0,0],[0,0,10],[6,0,10]]); break;
+    case 'three': bow(); L([[-6,0,10],[6,0,10],[0,0,2]], 1); L([[0,0,10],[0,0,16]]); break;
+    case 'yv': bow(); L([[0,0],[6,-14]]); break;
+    case 'diaph': bow(); L([[-10,-7],[-5,-13],[5,-13],[10,-7]]); break;
+    case 'bottom': bow(); L([[0,0,0],[0,0,10]]); L([[-6,0,10],[6,0,10]]); break;
+    case 'sp': L([[-2,-8],[-2,8]]); L([[2,-8],[2,8]]); T(k, 0, -16); break;
+    case 'cs': ctx.setLineDash([3/V.z, 2/V.z]); L([[-10,-7],[10,0],[-10,7]], 1); ctx.setLineDash([]); break;
+    case 'ys': L([[-10,0],[10,0]]); L([[0,0],[6,-12]]); break;
+    case 'prv': L([[-6,-6],[-6,6],[6,0]], 1); L([[0,0,0],[0,0,12]]); L([[-4,0,12],[4,0,12]]); break;
+    case 'spacer':
+      ctx.setLineDash([2/V.z, 2/V.z]); L([[-4,-8],[4,-8],[4,8],[-4,8]], 1); ctx.setLineDash([]);
+      L([[-7,-9],[-7,9]]); L([[7,-9],[7,9]]); break;
+    case 'fw': C(0, 0, 4, 1); T('FW', 0, -12); break;
+    case 'orf': C(0, 0, 8); L([[-8,0],[8,0]]); L([[0,-8],[0,8]]); break;
+    case 'p2p': C(0, 0, 4, 1); break;
+    case 'elbow': L([[0,0,0],[0,0,16]]); break;
+    default: break;
+  }
+  // Symbols without their own branch or stem show the chosen facing with a short stub
+  const native = ['tee','olet','needle','plug','three','bottom','prv','elbow'];
+  if (it.face && sh !== 'pipe' && !native.includes(sh)) L([[0,0,0],[0,0,12]]);
+}
+
+// pr = pixel ratio, bg = background colour or null, showGrid/ui = screen-only extras
+function paint(pr, bg, showGrid, ui) {
+  const w = cv.width / dpr, h = cv.height / dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height); }
+  ctx.setTransform(pr*V.z, 0, 0, pr*V.z, pr*V.x, pr*V.y);
+  if (showGrid) grid(w, h);
+
+  ctx.font = `${11/V.z}px "IBM Plex Sans", Tahoma, Arial, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.strokeStyle = '#1c2530'; ctx.fillStyle = '#1c2530'; ctx.lineWidth = (pr > 1 ? 3.4 : 2) / V.z;   // heavier lines for the printed sheet
+
+  segs = [];
+  const partOf = [];
+  bomData().forEach(r => r.idx.forEach(n => partOf[n - 1] = r.no));
+  // Text with a thin white halo so it stays readable where it crosses lines
+  const label = (t, x, y, color, align) => {
+    ctx.save();
+    ctx.textAlign = align || 'center';
+    ctx.lineWidth = 4 / V.z; ctx.strokeStyle = '#ffffff';
+    ctx.strokeText(t, x, y);
+    ctx.fillStyle = color; ctx.fillText(t, x, y);
+    ctx.restore();
+  };
+  items.forEach((it, i) => {
+    const [ux, uy] = scrOf(it);
+    drawItem(it, i, it.x, it.y, ux, uy);
+    const off = 18 / V.z;                        // same label distance on screen and in the export
+    const nx = -uy, ny = ux;                     // side of the pipe used for labels
+    const x2 = it.x + ux*it.len*SCALE, y2 = it.y + uy*it.len*SCALE;
+    if (it.len) {
+      ctx.beginPath(); ctx.moveTo(it.x, it.y); ctx.lineTo(x2, y2); ctx.stroke();
+      segs.push({i, x1: it.x, y1: it.y, x2, y2});
+    }
+    // On the drawing: only the item number and, for pipes, the length (kept away from the symbols).
+    // Size, schedule/class and the full description are shown in the BOM table only.
+    label('#' + partOf[i], it.x - off, it.y - off, ACC, 'right');
+    if (it.len) {
+      const mx = (it.x + x2) / 2, my = (it.y + y2) / 2, lo = 34 / V.z;
+      label(it.len + ' mm', mx + nx*lo, my + ny*lo, '#6d6a60');
+    }
+  });
+
+  if (ui && anchor && anchor.seg) {
+    ctx.save(); ctx.strokeStyle = ACC; ctx.lineWidth = 4 / V.z;
+    ctx.beginPath(); ctx.moveTo(anchor.seg[0], anchor.seg[1]); ctx.lineTo(anchor.seg[2], anchor.seg[3]); ctx.stroke();
+    ctx.restore();
+  }
+  if (ui && anchor) {
+    ctx.fillStyle = ACC;
+    ctx.beginPath(); ctx.arc(anchor.x, anchor.y, 5/V.z, 0, Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = '#1c2530';
+  }
+
+  ctx.fillStyle = ACC;
+  ctx.beginPath(); ctx.arc(0, 0, 3/V.z, 0, Math.PI*2); ctx.fill();
+  ctx.fillText('0', -10/V.z, 12/V.z);
+  ctx.fillStyle = '#1c2530';
+}
+
+function render() { paint(dpr, null, true, true); list(); }
+
+function list() {
+  const total = items.reduce((s, it) => s + (+it.len), 0);
+  let html = '';
+  if (anchor) {
+    const it = items[anchor.idx];
+    html += `<div class="anc">Branch point on item ${anchor.idx+1} (${SYMS[it.key].n}) at ${anchor.mm} mm. Choose a symbol and press Add.</div>`;
+  }
+  html += items.length
+    ? items.map((it, i) => `<div>${i+1}. ${SYMS[it.key].n} — ${it.len} mm — ${it.lbl || DN[it.d]}${it.size ? ' — ' + it.size : ''}${it.sch ? ' ' + it.sch : ''}${it.from ? ' (branch of item ' + it.from + ')' : ''}</div>`).join('') +
+      `<div class="tot">Total: ${total} mm</div>`
+    : '<div>No items yet. Choose a symbol, enter length and direction, then press Add. Tap any line of a drawn symbol to start a branch from that point.</div>';
+  $('list').innerHTML = html;
+  $('cb').disabled = !anchor;
+}
+
+// ---- Tap on any drawn line or point to set a branch point ----
+function hit(mx, my) {
+  let best = null;
+  const clamp = t => Math.max(0, Math.min(1, t));
+  for (const s of segs) {
+    if (s.pt) {
+      const d = Math.hypot(mx - s.x, my - s.y) * V.z;
+      if (d < 14 && (!best || d < best.d)) best = {d, i: s.i, x: s.x, y: s.y, seg: null, mm: 0};
+      continue;
+    }
+    const vx = s.x2 - s.x1, vy = s.y2 - s.y1, l2 = vx*vx + vy*vy;
+    if (!l2) continue;
+    const t = clamp(((mx - s.x1)*vx + (my - s.y1)*vy) / l2);
+    const px = s.x1 + vx*t, py = s.y1 + vy*t;
+    const d = Math.hypot(mx - px, my - py) * V.z;
+    if (d < 12 && (!best || d < best.d)) {
+      best = {d, i: s.i, x: px, y: py, seg: [s.x1, s.y1, s.x2, s.y2], mm: Math.round(t * Math.sqrt(l2) / SCALE)};
+    }
+  }
+  return best;
+}
+
+function doTap(e) {
+  const r = cv.getBoundingClientRect();
+  const h = hit((e.clientX - r.left - V.x) / V.z, (e.clientY - r.top - V.y) / V.z);
+  anchor = h ? {idx: h.i, x: h.x, y: h.y, mm: h.mm, seg: h.seg} : null;
+  render();
+}
+
+// ---- Pan and zoom: mouse drag, wheel, touch drag, pinch ----
+const ptrs = new Map();
+let pd = null, pm = null, down = null;
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId);
+  ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  down = ptrs.size === 1 ? {x: e.clientX, y: e.clientY} : null;
+  pd = null; pm = null;
+});
+cv.addEventListener('pointermove', e => {
+  if (!ptrs.has(e.pointerId)) return;
+  const prev = ptrs.get(e.pointerId);
+  ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  const r = cv.getBoundingClientRect();
+  if (ptrs.size === 1) {
+    V.x += e.clientX - prev.x;
+    V.y += e.clientY - prev.y;
+  } else if (ptrs.size === 2) {
+    down = null;
+    const [a, b] = [...ptrs.values()];
+    const nd = Math.hypot(a.x - b.x, a.y - b.y);
+    const mid = {x: (a.x + b.x)/2 - r.left, y: (a.y + b.y)/2 - r.top};
+    if (pd) {
+      zoomAt(mid.x, mid.y, nd / pd);
+      V.x += mid.x - pm.x;
+      V.y += mid.y - pm.y;
+    }
+    pd = nd; pm = mid;
+  }
+  render();
+});
+const endPtr = e => {
+  const isTap = down && ptrs.size === 1 && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6;
+  ptrs.delete(e.pointerId);
+  pd = null; pm = null;
+  if (isTap) { down = null; doTap(e); }
+  else if (ptrs.size === 0) down = null;
+};
+cv.addEventListener('pointerup', endPtr);
+cv.addEventListener('pointercancel', () => { ptrs.clear(); down = null; pd = null; pm = null; });
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect();
+  zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.1 : 0.9);
+}, {passive: false});
+
+// ---- Export: the whole drawing, not just the visible part, at print resolution ----
+function drawingCanvas() {
+  const xs = [0], ys = [0];
+  items.forEach(it => {
+    const [ux, uy] = scrOf(it), l = it.len * SCALE;
+    xs.push(it.x, it.x + ux*l); ys.push(it.y, it.y + uy*l);
+  });
+  const PAD = 40, M = 60, W = 2400;
+  const minX = Math.min(...xs) - PAD, maxX = Math.max(...xs) + PAD;
+  const minY = Math.min(...ys) - PAD, maxY = Math.max(...ys) + PAD;
+  const s = (W - 2*M) / (maxX - minX);          // pixels per model unit
+  const H = Math.ceil((maxY - minY) * s + 2*M);
+  const K = 2.2;                                 // thicker lines and larger text for print
+  const eg = document.createElement('canvas');
+  eg.width = W; eg.height = H;
+  const savedCtx = ctx, savedV = V;
+  ctx = eg.getContext('2d');
+  V = {x: (M - minX*s) / K, y: (M - minY*s) / K, z: s / K};
+  paint(K, '#ffffff', false, false);
+  ctx = savedCtx; V = savedV;
+  return eg;
+}
+
+// ---- Bill of Material: identical items (same symbol, joint and length) share one number ----
+const JN = {BW:'Buttweld', SW:'Socketweld', TH:'Threaded', FL:'Flanged'};
+function bomData() {
+  const map = new Map(), rows = [];
+  items.forEach((it, i) => {
+    const joint = it.f === 'f' ? JN[it.j] : '-';
+    const k = `${it.key}|${joint}|${it.len}|${it.flip ? 1 : 0}|${it.face || ''}|${it.lbl || ''}|${it.size || ''}|${it.sch || ''}`;
+    if (!map.has(k)) {
+      const r = {no: rows.length + 1, name: SYMS[it.key].n, joint, size: it.size || '-', sch: it.sch || '-', len: +it.len, pipe: it.key === 'pipe', qty: 0, idx: []};
+      map.set(k, r); rows.push(r);
+    }
+    const r = map.get(k); r.qty++; r.idx.push(i + 1);
+  });
+  return rows;
+}
+function openBom() {
+  const rows = bomData();
+  $('bomBody').innerHTML = rows.length
+    ? rows.map(r => `<tr><td>${r.no}</td><td>${r.name}</td><td>${r.joint}</td><td>${r.size}</td><td>${r.sch}</td><td>${r.pipe ? r.len + ' mm' : '-'}</td><td>${r.qty}</td><td>${r.pipe ? r.len * r.qty + ' mm' : '-'}</td><td>${r.idx.join(', ')}</td></tr>`).join('')
+    : '<tr><td colspan="9">No items yet</td></tr>';
+  const pipeTotal = rows.reduce((s, r) => s + (r.pipe ? r.len * r.qty : 0), 0);
+  const count = rows.reduce((s, r) => s + r.qty, 0);
+  $('bomTot').textContent = `Total items: ${count}   |   Total pipe length: ${pipeTotal} mm`;
+  $('bomImg').src = sheetCanvas().toDataURL('image/png');
+  $('bom').hidden = false;
+}
+function sheetCanvas() {
+  // Drawing on top at full width; compact BOM block in the bottom-left corner
+  const dc = drawingCanvas();
+  const rows = bomData();
+  const W = dc.width, M = 60, FS = 24, rowH = 36;   // text size matches the drawing's labels
+  const imgH = Math.round((W - 2*M) * dc.height / dc.width);
+  const TW = Math.round(W * 0.55);                         // table width matches the drawing's scale
+  const base = [['No.',50],['Description',260],['Joint',150],['Size',120],['Sch/Class',130],['Length',120],['Qty',60],['Total',130],['Items',200]];
+  const sum = base.reduce((t, c) => t + c[1], 0), f = TW / sum;
+  const cols = base.map(c => [c[0], c[1] * f]);
+  const all = [cols.map(c => c[0]), ...rows.map(r => [r.no, r.name, r.joint, r.size, r.sch, r.pipe ? r.len + ' mm' : '-', r.qty, r.pipe ? r.len * r.qty + ' mm' : '-', r.idx.join(', ')])];
+  const tableTop = M + imgH + 52;
+  const tableBottom = tableTop + all.length * rowH;
+  const H = tableBottom + M + 40;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  g.drawImage(dc, M, M, W - 2*M, imgH);
+  g.strokeStyle = '#1c2530'; g.lineWidth = 4; g.strokeRect(M, M, W - 2*M, imgH);
+  g.fillStyle = '#1c2530'; g.textBaseline = 'middle'; g.textAlign = 'left';
+  g.font = `bold ${FS + 2}px sans-serif`;
+  g.fillText('Bill of Material', M, tableTop - 18);
+  g.fillStyle = '#eee'; g.fillRect(M, tableTop, TW, rowH);
+  all.forEach((vals, ri) => {
+    const y = tableTop + ri * rowH;
+    g.font = (ri ? '' : 'bold ') + FS + 'px sans-serif';
+    g.fillStyle = '#1c2530';
+    let x = M;
+    vals.forEach((v, j) => { g.fillText(String(v), x + 5, y + rowH/2); x += cols[j][1]; });
+  });
+  g.strokeStyle = '#1c2530'; g.lineWidth = 3;
+  for (let ri = 0; ri <= all.length; ri++) { const y = tableTop + ri * rowH; g.beginPath(); g.moveTo(M, y); g.lineTo(M + TW, y); g.stroke(); }
+  let x = M; g.beginPath();
+  cols.forEach(col => { g.moveTo(x, tableTop); g.lineTo(x, tableBottom); x += col[1]; });
+  g.moveTo(M + TW, tableTop); g.lineTo(M + TW, tableBottom); g.stroke();
+  const pipeTotal = rows.reduce((t, r) => t + (r.pipe ? r.len * r.qty : 0), 0);
+  const count = rows.reduce((t, r) => t + r.qty, 0);
+  g.fillStyle = '#1c2530'; g.font = (FS - 1) + 'px sans-serif';
+  g.fillText(`Total items: ${count}  |  Total pipe length: ${pipeTotal} mm`, M, tableBottom + 16);
+  return c;
+}
+
+// ---- Saving: download when the browser allows it, and always show a link that opens the file ----
+function download(blob, name) {
+  const u = URL.createObjectURL(blob);
+  const l = $('bomOpen');
+  l.href = u; l.download = name; l.textContent = 'Open / save ' + name; l.hidden = false;
+  const a = document.createElement('a');
+  a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 120000);
+}
+function saveBomImage() {
+  sheetCanvas().toBlob(b => download(b, 'isometric_piping_BOM.png'), 'image/png');
+}
+function bytesOf(dataUrl) {
+  const bin = atob(dataUrl.split(',')[1]), out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+// Builds a one-page PDF that embeds the sheet as a JPEG
+function makePdf(cv) {
+  const jpg = bytesOf(cv.toDataURL('image/jpeg', 0.92));
+  const W = cv.width, H = cv.height, pw = 842, ph = Math.round(842 * H / W);
+  const enc = new TextEncoder(), parts = [], offs = [];
+  let len = 0;
+  const push = d => { const b = typeof d === 'string' ? enc.encode(d) : d; parts.push(b); len += b.length; };
+  const obj = (n, body) => { offs[n] = len; push(`${n} 0 obj\n${body}\nendobj\n`); };
+  const content = `q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q`;
+  push('%PDF-1.4\n');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+  obj(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>`);
+  obj(4, `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+  offs[5] = len;
+  push(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${W} /Height ${H} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`);
+  push(jpg);
+  push('\nendstream\nendobj\n');
+  const xref = len;
+  let x = 'xref\n0 6\n0000000000 65535 f \n';
+  for (let i = 1; i <= 5; i++) x += String(offs[i]).padStart(10, '0') + ' 00000 n \n';
+  x += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  push(x);
+  return new Blob(parts, {type: 'application/pdf'});
+}
+function savePdf() {
+  download(makePdf(sheetCanvas()), 'isometric_piping_BOM.pdf');
+}
+
+// ---- Toolbar ----
+function cancelBranch() { anchor = null; render(); }
+$('add').onclick = () => {
+  const k = $('sym').value, s = SYMS[k];
+  const [sx, sy] = anchor ? [anchor.x, anchor.y] : chainEnd();
+  const deg = +$('ang').value || 0, side = $('side').value;
+  const src = anchor ? items[anchor.idx] : items[items.length - 1];
+  const bent = deg > 0 && src ? bendVec(src, deg, side) : null;
+  const sideName = {U:'Up', D:'Down', L:'Left', R:'Right'}[side];
+  items.push({key: k, sh: s.sh, f: s.f, j: $('jt').value,
+    len: Math.max(0, +$('len').value || 0), d: bent ? src.d : $('dir').value,
+    c: bent, lbl: bent ? `${deg}° ${sideName}` : null,
+    size: $('size').value.trim(), sch: $('sch').value.trim(),
+    x: sx, y: sy, from: anchor ? anchor.idx + 1 : 0, flip: flipNext, face: $('face').value || null});
+  anchor = null;
+  render();
+};
+$('cb').onclick = cancelBranch;
+$('bomb').onclick = openBom;
+let flipNext = false;
+$('flipb').onclick = () => {
+  flipNext = !flipNext;
+  $('flipb').textContent = 'Mirror next: ' + (flipNext ? 'On' : 'Off');
+};
+$('face').onchange = () => {
+  if (!items.length) return;
+  items[items.length - 1].face = $('face').value || null;
+  render();
+};
+$('flipl').onclick = () => {
+  if (!items.length) return;
+  const last = items[items.length - 1];
+  last.flip = !last.flip;
+  render();
+};
+// Zoom and move so every drawn line, point and the origin are visible
+function fitAll() {
+  const pts = [[0, 0]];
+  segs.forEach(s => s.pt ? pts.push([s.x, s.y]) : pts.push([s.x1, s.y1], [s.x2, s.y2]));
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const a = $('area'), w = a.clientWidth, h = a.clientHeight;
+  const bw = Math.max(maxX - minX, 1), bh = Math.max(maxY - minY, 1);
+  V.z = Math.min(8, Math.max(0.2, Math.min(w / (bw + 80), h / (bh + 80))));
+  V.x = w / 2 - (minX + maxX) / 2 * V.z;
+  V.y = h / 2 - (minY + maxY) / 2 * V.z;
+  render();
+}
+$('fitb').onclick = fitAll;
+$('bomClose').onclick = () => { $('bom').hidden = true; };
+$('bomPrint').onclick = () => window.print();
+$('bomSave').onclick = saveBomImage;
+$('bomPdf').onclick = savePdf;
+$('undo').onclick = () => { items.pop(); anchor = null; render(); };
+$('clr').onclick = () => { items = []; anchor = null; render(); };
+$('zin').onclick = () => zoomAt(V.x, V.y, 1.2);
+$('zout').onclick = () => zoomAt(V.x, V.y, 1/1.2);
+$('center').onclick = () => { resetView(); render(); };
+$('png').onclick = () => {
+  const a = document.createElement('a');
+  a.download = 'isometric_piping.png';
+  a.href = drawingCanvas().toDataURL('image/png');
+  a.click();
+};
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { cancelBranch(); $('bom').hidden = true; } });
+window.addEventListener('resize', () => {
+  cv.width = $('area').clientWidth * dpr; cv.height = $('area').clientHeight * dpr;
+  render();
+});
+fit();
+});
+</script>
+<div id="bom" hidden>
+  <div class="sheet">
+    <div class="bar">
+      <button id="bomPrint">Print</button>
+      <button id="bomSave">Save image</button>
+      <button id="bomPdf">Save PDF</button>
+      <button id="bomClose">Close</button>
+    </div>
+    <img id="bomImg" alt="Drawing">
+    <h3>Bill of Material</h3>
+    <table>
+      <thead><tr><th>No.</th><th>Description</th><th>Joint</th><th>Size</th><th>Sch/Class</th><th>Length</th><th>Qty</th><th>Total length</th><th>Items in drawing</th></tr></thead>
+      <tbody id="bomBody"></tbody>
+    </table>
+    <p id="bomTot"></p>
+    <p><a id="bomOpen" target="_blank" rel="noopener" hidden></a></p>
+  </div>
+</div>
+</body>
+</html>
